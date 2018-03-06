@@ -1,9 +1,9 @@
 /*
- fork.c
- fork
+    fork.c
+    3 procesy + exit status
 
- Created by Adam Bezák on 3.3.18.
- Copyright © 2018 Adam Bezák. All rights reserved.
+    Created by Adam Bezák on 3.3.18.
+    xbezak01@stud.fit.vutbr.cz
 */
 
 
@@ -31,7 +31,7 @@ int main(int argc, char *argv[])
 {
     pid_t parentId, childId;
     
-    if (argc <= 1){
+    if (argc <= 1) {
         fprintf(stderr, "Chyba parametrov prikazoveho riadku.\n");
         return ERROR;
     }
@@ -93,5 +93,5 @@ void waitAndPrintProcessInfo(char *label, pid_t pid) {
 }
 
 void runProgram(char *argv[]) {
-    execv(argv[1], argv);
+    execv(argv[1], argv + 1);
 }
