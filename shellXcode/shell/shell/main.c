@@ -116,7 +116,97 @@ int initMonitor(struct Monitor *monitor, pthread_t *thread) {
     return OK;
 }
 
+static int setargs(char *args, char **argv) {
+    int count = 0;
+
+    while (isspace(*args)) ++args;
+    while (*args) {
+        if (argv) argv[count] = args;
+        while (*args && !isspace(*args)) ++args;
+        if (argv && *args) *args++ = '\0';
+        while (isspace(*args)) ++args;
+        count++;
+    }
+    return count;
+}
+
+char **parsedargs(char *args, int *argc) {
+    char **argv = NULL;
+    int    argn = 0;
+
+    if (args && *args
+        && (args = strdup(args))
+        && (argn = setargs(args,NULL))
+        && (argv = malloc((argn+1) * sizeof(char *)))) {
+        *argv++ = args;
+        argn = setargs(args,argv);
+    }
+
+    if (args && !argv) free(args);
+
+    *argc = argn;
+    return argv;
+}
+
+struct Command getCommand() {
+    struct Command command;
+    int i = 0;
+
+    command.argv =  parsedargs(bufferGlobal.buffer, &command.argc);
+    command.inputFile = NULL;
+    command.outputFile = NULL;
+    command.isBackground = false;
+    command.error = OK;
+
+    for(i = 0; i < command.argc; i++) {
+        char *currentArgv = command.argv[i];
+        unsigned long currentArgvLength = strlen(currentArgv);
+
+        switch (currentArgv[0]) {
+            case '<':
+                if (currentArgvLength <= 1) {
+                    command.error = ERR_INPUT_FILE;
+                }
+                command.inputFile = malloc((currentArgvLength - 1)* sizeof(char));
+                strcpy(command.inputFile, currentArgv + 1);
+                //TODO chyba \0 na konci
+                break;
+            case '>':
+                if (currentArgvLength <= 1) {
+                    command.error = ERR_OUTPUT_FILE;
+                }
+                command.outputFile = malloc((currentArgvLength - 1) * sizeof(char));
+                strcpy(command.outputFile, currentArgv + 1);
+                //TODO chyba \0 na konci
+                break;
+            case '&':
+                if (currentArgvLength != 1) {
+                    command.error = ERR_PARSE_AMPERSAND;
+                }
+                command.isBackground = true;
+                break;
+            default:
+                break;
+        }
+        //TODO na konci argv nulovy argument
+    }
+
+#ifdef DEBUG
+    int count;
+    printf("--------------\n");
+    printf("Pocet slov = %d\n", command.argc);
+    for(count = 0; count < command.argc; count++){
+        printf("argv[%d] %d = '%s'\n", count, (int)strlen(command.argv[count]), command.argv[count]);
+    }
+    printf("input = %s\noutput = %s\nna pozadi = %d\n", command.inputFile, command.outputFile, (int)command.isBackground);
+    printf("--------------\n");
+#endif
+
+    return command;
+}
+
 void *runCommand(void *arg) {
+    struct Command command;
     while (!end) {
         /* vstup do KS */
         lockKS(false);
@@ -127,8 +217,17 @@ void *runCommand(void *arg) {
         if (strcmp("exit", bufferGlobal.buffer) == 0) {
             end = true;
         } else if(bufferGlobal.length > 0) {
-            printf("%s", bufferGlobal.buffer);
+            command = getCommand();
+            if (command.error != OK) {
+                printError(command.error);
+            } else {
+                
+            }
         }
+
+//        free(&command.argv);
+//        free(&command.inputFile);
+//        free(&command.outputFile);
 
         /* vystup z KS */
         bufferGlobal.isReading = true;

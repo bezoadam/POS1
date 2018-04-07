@@ -29,6 +29,7 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <wordexp.h>
 
 enum {
     OK = 0,
@@ -94,6 +95,15 @@ struct Buffer {
     char buffer[BUFFER_MAX_LENGTH + 1];    /* +1 pro konec retezce */
     int  length;
     bool isReading;
+};
+
+struct Command {
+    int argc;
+    char **argv;
+    char *inputFile;
+    char *outputFile;
+    bool isBackground;
+    int error;
 };
 
 /* deklarace funkcii */
