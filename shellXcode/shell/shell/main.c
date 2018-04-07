@@ -49,9 +49,9 @@ int main(int argc, const char * argv[]) {
     freeMonitor(&monitorGlobal, &thread);
 
     /* end */
-    if(DEBUG){
+#ifdef CUSTOMDEBUG
         printf("------------------\nvse v poradku\n");
-    }
+#endif CUSTOMDEBUG
     return 0;
 }
 
@@ -88,9 +88,9 @@ void sigIntHandler(int sig) {
 void sigChldHandler(int sig, siginfo_t *pid, void *contxt) {
 
     waitpid(pid->si_pid, NULL, 0);
-    if (DEBUG){
-        printf("dokonceno\n");
-    }
+#ifdef CUSTOMDEBUG
+    printf("dokonceno\n");
+#endif
 }
 
 int initMonitor(struct Monitor *monitor, pthread_t *thread) {
@@ -130,9 +130,21 @@ static int setargs(char *args, char **argv) {
     return count;
 }
 
-char **parsedargs(char *args, int *argc) {
+void removeSubstring(char *s,const char *toremove) {
+    while(s=strstr(s,toremove))
+        memmove(s,s+strlen(toremove),1+strlen(s+strlen(toremove)));
+}
+
+char **parsedargs(char *args, int *argc, bool *isBackground) {
     char **argv = NULL;
     int    argn = 0;
+
+    if ((strstr(args, " & ") != NULL) || strstr(args, " &") != NULL) {
+        *isBackground = true;
+        removeSubstring(args, " &");
+    } else {
+        *isBackground = false;
+    }
 
     if (args && *args
         && (args = strdup(args))
@@ -144,6 +156,7 @@ char **parsedargs(char *args, int *argc) {
 
     if (args && !argv) free(args);
 
+    argv[argn] = NULL;
     *argc = argn;
     return argv;
 }
@@ -152,10 +165,9 @@ struct Command getCommand() {
     struct Command command;
     int i = 0;
 
-    command.argv =  parsedargs(bufferGlobal.buffer, &command.argc);
+    command.argv = parsedargs(bufferGlobal.buffer, &command.argc, &command.isBackground);
     command.inputFile = NULL;
     command.outputFile = NULL;
-    command.isBackground = false;
     command.error = OK;
 
     for(i = 0; i < command.argc; i++) {
@@ -183,7 +195,6 @@ struct Command getCommand() {
                 if (currentArgvLength != 1) {
                     command.error = ERR_PARSE_AMPERSAND;
                 }
-                command.isBackground = true;
                 break;
             default:
                 break;
@@ -191,7 +202,7 @@ struct Command getCommand() {
         //TODO na konci argv nulovy argument
     }
 
-#ifdef DEBUG
+#ifdef CUSTOMDEBUG
     int count;
     printf("--------------\n");
     printf("Pocet slov = %d\n", command.argc);
@@ -205,14 +216,63 @@ struct Command getCommand() {
     return command;
 }
 
+int startBackgroundCommand(struct Command *command) {
+    int error  = 0;
+    pid_t pid  = fork();
+
+    /* child */
+    if(pid == 0){
+        /* vykonani prikazu */
+        execvp(command->argv[0], command->argv);
+
+        /* chyba prikazu */
+        perror(errors[ERR_CMD]);
+        exit(EXIT_FAILURE);
+    } /* parent */
+    else if(pid > 0){
+        printf("\n na pozadi spusteno \n");
+    } else{
+        return ERR_FORK;
+    }
+
+    return OK;
+
+}
+
+int startNormalCommand(struct Command *command) {
+    pid_t pid  = fork();
+
+    /* child */
+    if(pid == 0) {
+        /* vykonani prikazu */
+        execvp(command->argv[0], command->argv);
+
+        /* chyba vykonania prikazu */
+        perror(errors[ERR_CMD]);
+        exit(EXIT_FAILURE);
+    } /* parent */
+    else if(pid > 0){
+        /* cekani na proces ... uchovani id, pro pripadne kill-nuti*/
+        waitpid(pid, NULL, 0);
+        return OK;
+    } else {
+        return ERR_FORK;
+    }
+
+    return OK;
+}
+
 void *runCommand(void *arg) {
     struct Command command;
+    int err;
+
     while (!end) {
         /* vstup do KS */
         lockKS(false);
 
-        if(DEBUG) printf("shell: delka vstupu: %d-%d\n'%s'\n", (int)strlen(bufferGlobal.buffer), bufferGlobal.length, bufferGlobal.buffer);
-
+#ifdef CUSTOMDEBUG
+        printf("shell: delka vstupu: %d-%d\n'%s'\n", (int)strlen(bufferGlobal.buffer), bufferGlobal.length, bufferGlobal.buffer);
+#endif
         /* Ukoncenie programu */
         if (strcmp("exit", bufferGlobal.buffer) == 0) {
             end = true;
@@ -221,13 +281,16 @@ void *runCommand(void *arg) {
             if (command.error != OK) {
                 printError(command.error);
             } else {
-                
+                if ((err = (command.isBackground ? startBackgroundCommand(&command) : startNormalCommand(&command)) != OK)) {
+                    printError(err);
+                }
+
             }
         }
 
-//        free(&command.argv);
-//        free(&command.inputFile);
-//        free(&command.outputFile);
+        /* free */
+        if (command.inputFile != NULL) free(command.inputFile);
+        if (command.outputFile != NULL) free(command.outputFile);
 
         /* vystup z KS */
         bufferGlobal.isReading = true;

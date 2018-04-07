@@ -6,7 +6,7 @@
 #define _REENTRANT
 #endif
 
-#define DEBUG 1
+//#define CUSTOMDEBUG 1
 #define PROMPT "$ "
 #define BUFFER_MAX_LENGTH 512
 #define PARSE_CHARS " \n\t"
