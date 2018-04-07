@@ -91,10 +91,9 @@ struct Monitor {
 };
 
 struct Buffer {
-    char read_buffer[BUFFER_MAX_LENGTH + 1];    /* +1 pro konec retezce */
+    char buffer[BUFFER_MAX_LENGTH + 1];    /* +1 pro konec retezce */
     int  length;
-    bool reading;
-
+    bool isReading;
 };
 
 /* deklarace funkcii */
@@ -135,12 +134,12 @@ int readStdin(void);
 /*
  * ==== vstup do kriticke sekce
  * */
-void lockKS(bool reading);
+void lockKS(bool isReading);
 
 /*
  * ==== uvolneni kriticke sekce
  * */
-void unlockKS(bool with_signal);
+void unlockKS();
 
 /*
  * ==== uvolneni pthreads

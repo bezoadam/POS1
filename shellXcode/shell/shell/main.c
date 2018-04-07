@@ -19,7 +19,7 @@ int main(int argc, const char * argv[]) {
     /* Odchytenie signalov */
     struct sigaction sigInt, sigChld;
     pthread_t thread;
-    bufferGlobal.reading = true;
+    bufferGlobal.isReading = true;
 
     /* kontrola parametru */
     if(argc != 1){
@@ -28,19 +28,19 @@ int main(int argc, const char * argv[]) {
     }
 
     /* inicializace sig */
-    if((err = initSigHandlers(&sigInt, &sigChld)) != OK){
+    if ((err = initSigHandlers(&sigInt, &sigChld)) != OK) {
         printError(err);
         return EXIT_FAILURE;
     }    
 
     /* inicializace pthreads */
-    if((err = initMonitor(&monitorGlobal, &thread)) != OK){
+    if ((err = initMonitor(&monitorGlobal, &thread)) != OK) {
         printError(err);
         return EXIT_FAILURE;
     }
 
     /* cteni vstupu */
-    if((err = readMyInput()) != OK){
+    if ((err = readMyInput()) != OK) {
         printError(err);
         freeMonitor(&monitorGlobal, &thread);
         return EXIT_FAILURE;
@@ -62,7 +62,7 @@ int initSigHandlers(struct sigaction *sigInt, struct sigaction *sigChld) {
     sigInt->sa_flags = SA_RESTART;
     sigemptyset(&sigInt->sa_mask);
 
-    if(sigaction(SIGINT, sigInt, NULL) == -1){
+    if (sigaction(SIGINT, sigInt, NULL) == -1) {
         return SIG_INT_ERR;
     }
 
@@ -70,7 +70,7 @@ int initSigHandlers(struct sigaction *sigInt, struct sigaction *sigChld) {
     sigChld->sa_flags    = SA_RESTART | SA_SIGINFO | SA_NOCLDSTOP;
     sigemptyset(&sigChld->sa_mask);
 
-    if(sigaction(SIGCHLD, sigChld, NULL) == -1){
+    if (sigaction(SIGCHLD, sigChld, NULL) == -1) {
         return SIG_CHLD_ERR;
     }
 
@@ -88,7 +88,7 @@ void sigIntHandler(int sig) {
 void sigChldHandler(int sig, siginfo_t *pid, void *contxt) {
 
     waitpid(pid->si_pid, NULL, 0);
-    if(DEBUG){
+    if (DEBUG){
         printf("dokonceno\n");
     }
 }
@@ -96,18 +96,18 @@ void sigChldHandler(int sig, siginfo_t *pid, void *contxt) {
 int initMonitor(struct Monitor *monitor, pthread_t *thread) {
 
     /* init mutexu */
-    if(pthread_mutex_init(&(monitor->mutex), NULL) != 0){
+    if (pthread_mutex_init(&(monitor->mutex), NULL) != 0) {
         return MUTEX_ERR;
     }
 
     /* init cond */
-    if(pthread_cond_init(&(monitor->cond), NULL) != 0){
+    if (pthread_cond_init(&(monitor->cond), NULL) != 0) {
         pthread_mutex_destroy(&(monitor->mutex));
         return COND_ERR;
     }
 
     /* Vytvorenie druheho vlakna na provedeni prikazu */
-    while (pthread_create(thread, NULL, runCommand, NULL)){
+    while (pthread_create(thread, NULL, runCommand, NULL)) {
         pthread_cond_destroy(&(monitor->cond));
         pthread_mutex_destroy(&(monitor->mutex));
         return THREAD_ERR;
@@ -117,25 +117,21 @@ int initMonitor(struct Monitor *monitor, pthread_t *thread) {
 }
 
 void *runCommand(void *arg) {
-    while(!end){
+    while (!end) {
         /* vstup do KS */
         lockKS(false);
 
-        /* obsluha prikazove radky */
-        if(DEBUG) printf("shell: delka vstupu: %d-%d\n'%s'\n", (int)strlen(bufferGlobal.read_buffer), bufferGlobal.length, bufferGlobal.read_buffer);
+        if(DEBUG) printf("shell: delka vstupu: %d-%d\n'%s'\n", (int)strlen(bufferGlobal.buffer), bufferGlobal.length, bufferGlobal.buffer);
 
-        /* ukonceni shellu */
-        if(strcmp("exit", bufferGlobal.read_buffer) == 0){
+        /* Ukoncenie programu */
+        if (strcmp("exit", bufferGlobal.buffer) == 0) {
             end = true;
-        }
-
-        /* zpracovani prikazu */
-        else if(bufferGlobal.length > 0){
-            printf("%s", bufferGlobal.read_buffer);
+        } else if(bufferGlobal.length > 0) {
+            printf("%s", bufferGlobal.buffer);
         }
 
         /* vystup z KS */
-        bufferGlobal.reading = true;
+        bufferGlobal.isReading = true;
         unlockKS(true);
     }
     pthread_exit(arg);
@@ -143,9 +139,8 @@ void *runCommand(void *arg) {
 
 int readMyInput() {
     int err;
-    bool with_signal = true;
 
-    while (!end){
+    while (!end) {
         /* vstup do KS */
         lockKS(true);
 
@@ -155,26 +150,20 @@ int readMyInput() {
             /* PROMPT */
             write(STDOUT_FILENO, (void*)PROMPT, strlen(PROMPT));
 
-            /* cteni ze stdin */
-            if((err = readStdin()) != OK){
-                bufferGlobal.reading = true;
+            if ((err = readStdin()) != OK) {
+                bufferGlobal.isReading = true;
                 printError(err);
+            } else {
+                bufferGlobal.isReading = false;
             }
-            else{
-                bufferGlobal.reading = false;
-            }
-
-            with_signal = true;
         }
         /* nastal end - neni co odblokovat */
-        else{
-            bufferGlobal.reading = false;
-            with_signal = false;
+        else {
+            bufferGlobal.isReading = false;
         }
 
         /* odblokovani cekajici udalosti + vystup z KS */
-        unlockKS(with_signal);
-        if(!with_signal) return OK;
+        unlockKS();
     }
 
     return OK;
@@ -182,33 +171,36 @@ int readMyInput() {
 
 int readStdin() {
     bufferGlobal.length = 0;
-    bufferGlobal.read_buffer[0] = '\0';
+    bufferGlobal.buffer[0] = '\0';
 
-    bufferGlobal.length = read(STDIN_FILENO, (void*)bufferGlobal.read_buffer, BUFFER_MAX_LENGTH + 1);
+    /* nacitam vstup */
+    bufferGlobal.length = read(STDIN_FILENO, (void*)bufferGlobal.buffer, BUFFER_MAX_LENGTH + 1);
 
-    /* kontrola delky - BUFFER_MAX_LENGTH */
-    if(bufferGlobal.length > BUFFER_MAX_LENGTH && bufferGlobal.read_buffer[BUFFER_MAX_LENGTH] != '\n'){
+    /* Skontrolujem dlzku */
+    if (bufferGlobal.length > BUFFER_MAX_LENGTH && bufferGlobal.buffer[BUFFER_MAX_LENGTH] != '\n') {
+        /* docitam vstup do konca */
         while('\n' != getchar());
         return BUFFER_MAX_LENGTH_ERR;
     }
     else if(bufferGlobal.length > 0){
         /* nastaveni konce stringu */
-        bufferGlobal.read_buffer[bufferGlobal.length-1] = '\0';
-        bufferGlobal.length = (int)strlen(bufferGlobal.read_buffer);
+        bufferGlobal.buffer[bufferGlobal.length - 1] = '\0';
+        bufferGlobal.length = (int)strlen(bufferGlobal.buffer);
     }
     return OK;
 }
 
-void lockKS(bool reading) {
+void lockKS(bool isReading) {
     pthread_mutex_lock(&(monitorGlobal.mutex));
-    while(reading ? !bufferGlobal.reading : bufferGlobal.reading){
+    bool cond = isReading ? !bufferGlobal.isReading : bufferGlobal.isReading;
+    while(cond) {
         pthread_cond_wait(&(monitorGlobal.cond), &(monitorGlobal.mutex));
     }
 }
 
-void unlockKS(bool with_signal) {
+void unlockKS() {
     /* odblokovani cekajici udalosti + vystup z KS */
-    if(with_signal) pthread_cond_signal(&(monitorGlobal.cond));
+    pthread_cond_signal(&(monitorGlobal.cond));
     pthread_mutex_unlock(&(monitorGlobal.mutex));
 }
 
