@@ -51,7 +51,7 @@ int main(int argc, const char * argv[]) {
     /* end */
 #ifdef CUSTOMDEBUG
         printf("------------------\nvse v poradku\n");
-#endif CUSTOMDEBUG
+#endif
     return 0;
 }
 
@@ -82,9 +82,6 @@ void sigIntHandler(int sig) {
 
 }
 
-/*
- * ==== handler pro sig chld
- * */
 void sigChldHandler(int sig, siginfo_t *pid, void *contxt) {
 
     waitpid(pid->si_pid, NULL, 0);
@@ -131,14 +128,14 @@ static int setargs(char *args, char **argv) {
 }
 
 void removeSubstring(char *s,const char *toremove) {
-    while(s=strstr(s,toremove))
-        memmove(s,s+strlen(toremove),1+strlen(s+strlen(toremove)));
+    while ((s=strstr(s,toremove))) memmove(s,s+strlen(toremove),1+strlen(s+strlen(toremove)));
 }
 
 char **parsedargs(char *args, int *argc, bool *isBackground) {
     char **argv = NULL;
     int    argn = 0;
 
+    /* je potrebne zistit a odstranit vyskyt ampersandu */
     if ((strstr(args, " & ") != NULL) || strstr(args, " &") != NULL) {
         *isBackground = true;
         removeSubstring(args, " &");
@@ -165,6 +162,7 @@ struct Command getCommand() {
     struct Command command;
     int i = 0;
 
+    /* buffer -> argv */
     command.argv = parsedargs(bufferGlobal.buffer, &command.argc, &command.isBackground);
     command.inputFile = NULL;
     command.outputFile = NULL;
@@ -177,7 +175,7 @@ struct Command getCommand() {
         switch (currentArgv[0]) {
             case '<':
                 if (currentArgvLength <= 1) {
-                    command.error = ERR_INPUT_FILE;
+                    command.error = INPUT_FILE_ERR;
                 }
                 command.inputFile = malloc((currentArgvLength - 1)* sizeof(char));
                 strcpy(command.inputFile, currentArgv + 1);
@@ -185,7 +183,7 @@ struct Command getCommand() {
                 break;
             case '>':
                 if (currentArgvLength <= 1) {
-                    command.error = ERR_OUTPUT_FILE;
+                    command.error = OUTPUT_FILE_ERR;
                 }
                 command.outputFile = malloc((currentArgvLength - 1) * sizeof(char));
                 strcpy(command.outputFile, currentArgv + 1);
@@ -193,13 +191,12 @@ struct Command getCommand() {
                 break;
             case '&':
                 if (currentArgvLength != 1) {
-                    command.error = ERR_PARSE_AMPERSAND;
+                    command.error = AMPERSAND_ERR;
                 }
                 break;
             default:
                 break;
         }
-        //TODO na konci argv nulovy argument
     }
 
 #ifdef CUSTOMDEBUG
@@ -226,13 +223,13 @@ int startBackgroundCommand(struct Command *command) {
         execvp(command->argv[0], command->argv);
 
         /* chyba prikazu */
-        perror(errors[ERR_CMD]);
+        perror(errors[COMMAND_BG_ERR]);
         exit(EXIT_FAILURE);
     } /* parent */
     else if(pid > 0){
         printf("\n na pozadi spusteno \n");
     } else{
-        return ERR_FORK;
+        return FORK_ERR;
     }
 
     return OK;
@@ -248,7 +245,7 @@ int startNormalCommand(struct Command *command) {
         execvp(command->argv[0], command->argv);
 
         /* chyba vykonania prikazu */
-        perror(errors[ERR_CMD]);
+        perror(errors[COMMAND_ERR]);
         exit(EXIT_FAILURE);
     } /* parent */
     else if(pid > 0){
@@ -256,7 +253,7 @@ int startNormalCommand(struct Command *command) {
         waitpid(pid, NULL, 0);
         return OK;
     } else {
-        return ERR_FORK;
+        return FORK_ERR;
     }
 
     return OK;
@@ -375,4 +372,3 @@ void freeMonitor(struct Monitor *monitor, pthread_t *thread) {
 void printError(int err) {
     fprintf(stderr, "%s", errors[err]);
 }
-

@@ -40,15 +40,15 @@ enum {
     MUTEX_ERR,
     BUFFER_MAX_LENGTH_ERR,
     ERR_MALLOC_ADD_LIST, //unused
-    ERR_PARSE_AMPERSAND, //unused
+    AMPERSAND_ERR,
     ERR_PARSE_SPECIAL_CHARS, //unused
     ERR_PARSE_FILE, //unused
-    ERR_FORK, //unused
-    ERR_CMD_BG, //unused
-    ERR_INPUT_FILE, //unused
-    ERR_OUTPUT_FILE, //unused
-    ERR_MALLOC, //unused
-    ERR_CMD //unused
+    FORK_ERR,
+    COMMAND_BG_ERR,
+    COMMAND_ERR,
+    INPUT_FILE_ERR,
+    OUTPUT_FILE_ERR,
+    ERR_MALLOC //unused
 };
 
 const char *errors[] = {
@@ -60,15 +60,15 @@ const char *errors[] = {
     "Chyba pri inicializacii mutexu.\n",
     "Prilis dlhy vstup.\n",
     "Chyba alokovani dat pri pridavani prvku do seznamu\n",
-    "Chyba syntaxe: za ampersandem nesmi nasledovat dalsi text bez mezery\n",
+    "Chyba syntaxe programu.\n",
     "Chyba syntaxe: specialni znaky &,<,> musi byt v prikazu at na poslednich mistech\n",
     "Chyba syntaxe: vstupni/vystupni soubor byl spatne zadan\n",
-    "Chyba forku\n",
-    "Chyba prikazu na pozadi\n",
-    "Chyba otevreni souboru input\n",
-    "Chyba otevreni souboru output\n",
-    "Chyba alokovani prostoru\n",
-    "Chyba prikazu"
+    "Chyba pri forku.\n",
+    "Chyba pri vykonavani prikazu na pozadi.\n",
+    "Chyba pri vykonavani prikazu.",
+    "Chyba pri praci so vstupnym suborom.\n",
+    "Chyba pri praci s vystupnym suborom.\n",
+    "Chyba alokovani prostoru\n"
 };
 
 /* napoveda programu */
@@ -125,6 +125,12 @@ void sigChldHandler(int sig, siginfo_t *pid, void *contxt);
  * ==== inicializace monitoru
  * */
 int initMonitor(struct Monitor *monitor, pthread_t *thread);
+
+static int setargs(char *args, char **argv);
+char **parsedargs(char *args, int *argc, bool *isBackground);
+struct Command getCommand();
+int startBackgroundCommand(struct Command *command);
+int startNormalCommand(struct Command *command);
 
 /*
  * ==== vlakno pro spousteni prikazu = shell
