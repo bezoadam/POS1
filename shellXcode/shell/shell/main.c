@@ -16,6 +16,7 @@ struct Monitor monitorGlobal;
 struct Buffer bufferGlobal;
 bool end = false;
 
+
 int main(int argc, const char * argv[]) {
 
     int err = 0;
@@ -165,16 +166,16 @@ char **parsedargs(char *args, int *argc, bool *isBackground) {
 struct Command getCommand() {
     struct Command command;
     int i = 0, commandLineArgc = 0;
+    /* buffer -> argv */
     char **commandLineArgv = parsedargs(bufferGlobal.buffer, &commandLineArgc, &command.isBackground);
 
-    /* buffer -> argv */
     command.argv = NULL;
     command.argc = 0;
     command.inputFile = NULL;
     command.outputFile = NULL;
     command.error = OK;
 
-    /* alokovani pole */
+    /* alokovanie pola */
     command.argv = malloc((commandLineArgc * sizeof(char*)) + 2*sizeof(char*));
 
     for(i = 0; i < commandLineArgc; i++) {
@@ -297,7 +298,7 @@ int startNormalCommand(struct Command *command) {
     pid_t pid  = fork();
 
     /* child */
-    if(pid == 0) {
+    if (pid == 0) {
         /* presmerovanie vystupu */
         if (command->outputFile != NULL) {
             if ((err = redirectOutput(command->outputFile) != OK)) {
@@ -311,15 +312,14 @@ int startNormalCommand(struct Command *command) {
             }
         }
 
-        /* vykonani prikazu */
+        /* vykonanie prikazu */
         execvp(command->argv[0], command->argv);
 
         /* chyba vykonania prikazu */
         perror(errors[COMMAND_ERR]);
         exit(EXIT_FAILURE);
-    } /* parent */
-    else if(pid > 0){
-        /* cekani na proces ... uchovani id, pro pripadne kill-nuti*/
+    } else if(pid > 0){
+        /* cekani na child proces */
         waitpid(pid, NULL, 0);
         return OK;
     } else {
@@ -338,7 +338,7 @@ void *runCommand(void *arg) {
         lockKS(false);
 
 #ifdef CUSTOMDEBUG
-        printf("shell: delka vstupu: %d-%d\n'%s'\n", (int)strlen(bufferGlobal.buffer), bufferGlobal.length, bufferGlobal.buffer);
+        printf("shell: dlzka vstupu: %d-%d\n'%s'\n", (int)strlen(bufferGlobal.buffer), bufferGlobal.length, bufferGlobal.buffer);
 #endif
         /* Ukoncenie programu */
         if (strcmp("exit", bufferGlobal.buffer) == 0) {
@@ -353,15 +353,15 @@ void *runCommand(void *arg) {
                 }
 
             }
+            /* free */
             if (command.inputFile != NULL) free(command.inputFile);
             if (command.outputFile != NULL) free(command.outputFile);
         }
 
-        /* free */
 
         /* vystup z KS */
         bufferGlobal.isReading = true;
-        unlockKS(true);
+        unlockKS();
     }
     pthread_exit(arg);
 }
@@ -374,7 +374,6 @@ int readMyInput() {
         /* vstup do KS */
         lockKS(true);
 
-        /* muzume zacit cist dokoncene procesy a zapsat prompt */
         if(!end){
 
             /* PROMPT */
@@ -394,9 +393,8 @@ int readMyInput() {
             withSignal = false;
         }
 
-        /* odblokovani cekajici udalosti + vystup z KS */
-        unlockKS(withSignal);
-        if(!withSignal) return OK;
+        /* vystup z KS */
+        unlockKS();
     }
 
     return OK;
@@ -416,7 +414,6 @@ int readStdin() {
         return BUFFER_MAX_LENGTH_ERR;
     }
     else if(bufferGlobal.length > 0){
-        /* nastaveni konce stringu */
         bufferGlobal.buffer[bufferGlobal.length - 1] = '\0';
         bufferGlobal.length = (int)strlen(bufferGlobal.buffer);
     }
@@ -426,13 +423,14 @@ int readStdin() {
 void lockKS(bool isReading) {
     pthread_mutex_lock(&(monitorGlobal.mutex));
     while(isReading ? !bufferGlobal.isReading : bufferGlobal.isReading) {
+        /* queue */
         pthread_cond_wait(&(monitorGlobal.cond), &(monitorGlobal.mutex));
     }
 }
 
-void unlockKS(bool withSignal) {
-    /* odblokovani cekajici udalosti + vystup z KS */
-    if (withSignal) pthread_cond_signal(&(monitorGlobal.cond));
+void unlockKS() {
+    /* odblokovanie cakajucej udalosti v queue + vystup z KS */
+    pthread_cond_signal(&(monitorGlobal.cond));
     pthread_mutex_unlock(&(monitorGlobal.mutex));
 }
 

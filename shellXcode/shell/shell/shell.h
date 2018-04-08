@@ -155,7 +155,7 @@ void lockKS(bool isReading);
 /*
  * ==== uvolneni kriticke sekce
  * */
-void unlockKS(bool withSignal);
+void unlockKS();
 
 /*
  * ==== uvolneni pthreads
