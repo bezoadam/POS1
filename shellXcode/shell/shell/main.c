@@ -1,12 +1,13 @@
-//
-//  main.c
-//  shell
-//
-//  Created by Adam Bezák on 7.4.18.
-//  Copyright © 2018 Adam Bezák. All rights reserved.
-//
-//TODO Pomocí Ctrl-C se ukončí aktuálně běžící proces na popředí (pokud nějaký je).
-//TODO Kontrolu na ukončení synů (běžících na pozadí) provádějte pomocí signálu SIGCHLD. Informaci o ukončení synů na pozadí vypište!
+/*
+ main.c
+ shell
+
+ Created by Adam Bezák on 7.4.18.
+ Copyright © 2018 Adam Bezák. All rights reserved.
+
+ TODO Pomocí Ctrl-C se ukončí aktuálně běžící proces na popředí (pokud nějaký je).
+ TODO Kontrolu na ukončení synů (běžících na pozadí) provádějte pomocí signálu SIGCHLD. Informaci o ukončení synů na pozadí vypište!
+ */
 
 #include "shell.h"
 
@@ -33,7 +34,7 @@ int main(int argc, const char * argv[]) {
     if ((err = initSigHandlers(&sigInt, &sigChld)) != OK) {
         printError(err);
         return EXIT_FAILURE;
-    }    
+    }
 
     /* inicializace pthreads */
     if ((err = initMonitor(&monitorGlobal, &thread)) != OK) {
@@ -52,7 +53,7 @@ int main(int argc, const char * argv[]) {
 
     /* end */
 #ifdef CUSTOMDEBUG
-        printf("------------------\nvse v poradku\n");
+    printf("------------------\nvse v poradku\n");
 #endif
     return 0;
 }
@@ -104,7 +105,7 @@ int initMonitor(struct Monitor *monitor, pthread_t *thread) {
     }
 
     /* Vytvorenie druheho vlakna na provedeni prikazu */
-    while (pthread_create(thread, NULL, runCommand, NULL)) {
+    if (pthread_create(thread, NULL, runCommand, NULL) != 0) {
         pthread_cond_destroy(&(monitor->cond));
         pthread_mutex_destroy(&(monitor->mutex));
         return THREAD_ERR;
@@ -148,7 +149,7 @@ char **parsedargs(char *args, int *argc, bool *isBackground) {
     if (args && *args
         && (args = strdup(args))
         && (argn = setargs(args,NULL))
-        && (argv = malloc((argn+1) * sizeof(char *)))) {
+        && (argv = malloc((argn+2) * sizeof(char *)))) {
         *argv++ = args;
         argn = setargs(args,argv);
     }
@@ -367,6 +368,7 @@ void *runCommand(void *arg) {
 
 int readMyInput() {
     int err;
+    bool withSignal = true;
 
     while (!end) {
         /* vstup do KS */
@@ -384,14 +386,17 @@ int readMyInput() {
             } else {
                 bufferGlobal.isReading = false;
             }
+            withSignal = true;
         }
         /* nastal end - neni co odblokovat */
         else {
             bufferGlobal.isReading = false;
+            withSignal = false;
         }
 
         /* odblokovani cekajici udalosti + vystup z KS */
-        unlockKS();
+        unlockKS(withSignal);
+        if(!withSignal) return OK;
     }
 
     return OK;
@@ -420,15 +425,14 @@ int readStdin() {
 
 void lockKS(bool isReading) {
     pthread_mutex_lock(&(monitorGlobal.mutex));
-    bool cond = isReading ? !bufferGlobal.isReading : bufferGlobal.isReading;
-    while(cond) {
+    while(isReading ? !bufferGlobal.isReading : bufferGlobal.isReading) {
         pthread_cond_wait(&(monitorGlobal.cond), &(monitorGlobal.mutex));
     }
 }
 
-void unlockKS() {
+void unlockKS(bool withSignal) {
     /* odblokovani cekajici udalosti + vystup z KS */
-    pthread_cond_signal(&(monitorGlobal.cond));
+    if (withSignal) pthread_cond_signal(&(monitorGlobal.cond));
     pthread_mutex_unlock(&(monitorGlobal.mutex));
 }
 

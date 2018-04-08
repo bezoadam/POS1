@@ -6,7 +6,7 @@
 #define _REENTRANT
 #endif
 
-#define CUSTOMDEBUG 1
+//#define CUSTOMDEBUG 1
 #define PROMPT "$ "
 #define BUFFER_MAX_LENGTH 512
 #define PARSE_CHARS " \n\t"
@@ -155,7 +155,7 @@ void lockKS(bool isReading);
 /*
  * ==== uvolneni kriticke sekce
  * */
-void unlockKS();
+void unlockKS(bool withSignal);
 
 /*
  * ==== uvolneni pthreads
