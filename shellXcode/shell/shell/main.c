@@ -5,6 +5,8 @@
 //  Created by Adam Bezák on 7.4.18.
 //  Copyright © 2018 Adam Bezák. All rights reserved.
 //
+//TODO Pomocí Ctrl-C se ukončí aktuálně běžící proces na popředí (pokud nějaký je).
+//TODO Kontrolu na ukončení synů (běžících na pozadí) provádějte pomocí signálu SIGCHLD. Informaci o ukončení synů na pozadí vypište!
 
 #include "shell.h"
 
@@ -85,9 +87,7 @@ void sigIntHandler(int sig) {
 void sigChldHandler(int sig, siginfo_t *pid, void *contxt) {
 
     waitpid(pid->si_pid, NULL, 0);
-#ifdef CUSTOMDEBUG
-    printf("dokonceno\n");
-#endif
+    printf("Pid: %d finished.\n", pid->si_pid);
 }
 
 int initMonitor(struct Monitor *monitor, pthread_t *thread) {
@@ -118,7 +118,9 @@ static int setargs(char *args, char **argv) {
 
     while (isspace(*args)) ++args;
     while (*args) {
-        if (argv) argv[count] = args;
+        if (argv) {
+            argv[count] = args;
+        }
         while (*args && !isspace(*args)) ++args;
         if (argv && *args) *args++ = '\0';
         while (isspace(*args)) ++args;
@@ -153,23 +155,30 @@ char **parsedargs(char *args, int *argc, bool *isBackground) {
 
     if (args && !argv) free(args);
 
-    argv[argn] = NULL;
+    argv[argn] = (char*) 0;
+
     *argc = argn;
     return argv;
 }
 
 struct Command getCommand() {
     struct Command command;
-    int i = 0;
+    int i = 0, commandLineArgc = 0;
+    char **commandLineArgv = parsedargs(bufferGlobal.buffer, &commandLineArgc, &command.isBackground);
 
     /* buffer -> argv */
-    command.argv = parsedargs(bufferGlobal.buffer, &command.argc, &command.isBackground);
+    command.argv = NULL;
+    command.argc = 0;
     command.inputFile = NULL;
     command.outputFile = NULL;
     command.error = OK;
 
-    for(i = 0; i < command.argc; i++) {
-        char *currentArgv = command.argv[i];
+    /* alokovani pole */
+    command.argv = malloc((commandLineArgc * sizeof(char*)) + 2*sizeof(char*));
+
+    for(i = 0; i < commandLineArgc; i++) {
+        char *currentArgv = commandLineArgv[i];
+        if (currentArgv == NULL) continue;
         unsigned long currentArgvLength = strlen(currentArgv);
 
         switch (currentArgv[0]) {
@@ -177,9 +186,9 @@ struct Command getCommand() {
                 if (currentArgvLength <= 1) {
                     command.error = INPUT_FILE_ERR;
                 }
-                command.inputFile = malloc((currentArgvLength - 1)* sizeof(char));
+                command.inputFile = malloc((currentArgvLength - 1) * sizeof(char));
                 strcpy(command.inputFile, currentArgv + 1);
-                //TODO chyba \0 na konci
+                command.inputFile[currentArgvLength - 1] = '\0';
                 break;
             case '>':
                 if (currentArgvLength <= 1) {
@@ -187,7 +196,7 @@ struct Command getCommand() {
                 }
                 command.outputFile = malloc((currentArgvLength - 1) * sizeof(char));
                 strcpy(command.outputFile, currentArgv + 1);
-                //TODO chyba \0 na konci
+                command.outputFile[currentArgvLength - 1] = '\0';
                 break;
             case '&':
                 if (currentArgvLength != 1) {
@@ -195,9 +204,16 @@ struct Command getCommand() {
                 }
                 break;
             default:
+                command.argv[command.argc] = NULL;
+                command.argv[command.argc] = malloc((currentArgvLength * sizeof(char)) + sizeof(char));
+                strcpy(command.argv[command.argc], currentArgv);
+                command.argv[command.argc][currentArgvLength] = '\0';
+                command.argc++;
                 break;
         }
     }
+
+    command.argv[command.argc] = (char*) 0;
 
 #ifdef CUSTOMDEBUG
     int count;
@@ -213,12 +229,51 @@ struct Command getCommand() {
     return command;
 }
 
+int redirectOutput(char *outputFile) {
+    int out = open(outputFile, O_RDWR|O_CREAT|O_APPEND, 0600);
+    if (out == -1) {
+        return OUTPUT_FILE_ERR;
+    }
+
+    if (dup2(out, fileno(stdout)) == -1) {
+        return OUTPUT_FILE_ERR;
+    }
+
+    return OK;
+}
+
+int redirectInput(char *inputFile) {
+    int in = open(inputFile, O_RDONLY);
+    if (in == -1) {
+        return INPUT_FILE_ERR;
+    }
+
+    if (dup2(in, fileno(stdin)) == -1) {
+        return INPUT_FILE_ERR;
+    }
+
+    return OK;
+}
+
 int startBackgroundCommand(struct Command *command) {
-    int error  = 0;
+    int err = 0;
     pid_t pid  = fork();
 
     /* child */
-    if(pid == 0){
+    if(pid == 0) {
+        /* presmerovanie vystupu */
+        if (command->outputFile != NULL) {
+            if ((err = redirectOutput(command->outputFile) != OK)) {
+                printError(err);
+            }
+        }
+        /* presmerovanie vstupu */
+        if (command->inputFile != NULL) {
+            if ((err = redirectInput(command->inputFile) != OK)) {
+                printError(err);
+            }
+        }
+
         /* vykonani prikazu */
         execvp(command->argv[0], command->argv);
 
@@ -226,7 +281,7 @@ int startBackgroundCommand(struct Command *command) {
         perror(errors[COMMAND_BG_ERR]);
         exit(EXIT_FAILURE);
     } /* parent */
-    else if(pid > 0){
+    else if(pid > 0) {
         printf("\n na pozadi spusteno \n");
     } else{
         return FORK_ERR;
@@ -237,10 +292,24 @@ int startBackgroundCommand(struct Command *command) {
 }
 
 int startNormalCommand(struct Command *command) {
+    int err = 0;
     pid_t pid  = fork();
 
     /* child */
     if(pid == 0) {
+        /* presmerovanie vystupu */
+        if (command->outputFile != NULL) {
+            if ((err = redirectOutput(command->outputFile) != OK)) {
+                printError(err);
+            }
+        }
+        /* presmerovanie vstupu */
+        if (command->inputFile != NULL) {
+            if ((err = redirectInput(command->inputFile) != OK)) {
+                printError(err);
+            }
+        }
+
         /* vykonani prikazu */
         execvp(command->argv[0], command->argv);
 
@@ -283,11 +352,11 @@ void *runCommand(void *arg) {
                 }
 
             }
+            if (command.inputFile != NULL) free(command.inputFile);
+            if (command.outputFile != NULL) free(command.outputFile);
         }
 
         /* free */
-        if (command.inputFile != NULL) free(command.inputFile);
-        if (command.outputFile != NULL) free(command.outputFile);
 
         /* vystup z KS */
         bufferGlobal.isReading = true;
