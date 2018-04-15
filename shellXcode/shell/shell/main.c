@@ -1,12 +1,6 @@
-/*
- main.c
- shell
-
- Created by Adam Bezák on 7.4.18.
- Copyright © 2018 Adam Bezák. All rights reserved.
-
- TODO Pomocí Ctrl-C se ukončí aktuálně běžící proces na popředí (pokud nějaký je).
- TODO Kontrolu na ukončení synů (běžících na pozadí) provádějte pomocí signálu SIGCHLD. Informaci o ukončení synů na pozadí vypište!
+/**
+ *  Program: Shell
+ *  Author: Adam Bezak xbezak01
  */
 
 #include "shell.h"
@@ -15,7 +9,7 @@
 struct Monitor monitorGlobal;
 struct Buffer bufferGlobal;
 bool end = false;
-
+pid_t foregroundProcess = -1;
 
 int main(int argc, const char * argv[]) {
 
@@ -31,19 +25,19 @@ int main(int argc, const char * argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* inicializace sig */
+    /* inicializacia sig handlerov */
     if ((err = initSigHandlers(&sigInt, &sigChld)) != OK) {
         printError(err);
         return EXIT_FAILURE;
-    }
+    }    
 
-    /* inicializace pthreads */
+    /* inicializacia pthreads */
     if ((err = initMonitor(&monitorGlobal, &thread)) != OK) {
         printError(err);
         return EXIT_FAILURE;
     }
 
-    /* cteni vstupu */
+    /* citanie vstupu */
     if ((err = readMyInput()) != OK) {
         printError(err);
         freeMonitor(&monitorGlobal, &thread);
@@ -52,9 +46,8 @@ int main(int argc, const char * argv[]) {
 
     freeMonitor(&monitorGlobal, &thread);
 
-    /* end */
 #ifdef CUSTOMDEBUG
-    printf("------------------\nvse v poradku\n");
+        printf("OK return 0\n");
 #endif
     return 0;
 }
@@ -83,13 +76,27 @@ int initSigHandlers(struct sigaction *sigInt, struct sigaction *sigChld) {
 
 
 void sigIntHandler(int sig) {
-
+    if (foregroundProcess != -1) {
+        printf("\n");
+        kill(foregroundProcess, SIGKILL);
+        foregroundProcess = -1;
+    }
+    printf("\n");
 }
 
 void sigChldHandler(int sig, siginfo_t *pid, void *contxt) {
-
-    waitpid(pid->si_pid, NULL, 0);
-    printf("Pid: %d finished.\n", pid->si_pid);
+    int status;
+    pid_t id = waitpid(-1, &status, WNOHANG);
+    
+    if (id > 0) {
+        if(WIFEXITED(status)) {
+            printf("normal termination of pid %d (exit code = %d)\n", id, WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+            printf("signal termination of pid %d (signal = %d)\n", id, WTERMSIG(status));            
+        } else {
+            printf("unknown\n");
+        }
+    }
 }
 
 int initMonitor(struct Monitor *monitor, pthread_t *thread) {
@@ -166,39 +173,38 @@ char **parsedargs(char *args, int *argc, bool *isBackground) {
 struct Command getCommand() {
     struct Command command;
     int i = 0, commandLineArgc = 0;
-    /* buffer -> argv */
+    unsigned long currentArgvLength;
     char **commandLineArgv = parsedargs(bufferGlobal.buffer, &commandLineArgc, &command.isBackground);
 
+    /* buffer -> argv */
     command.argv = NULL;
     command.argc = 0;
     command.inputFile = NULL;
     command.outputFile = NULL;
     command.error = OK;
 
-    /* alokovanie pola */
+    /* alokovanie potrebneho pola */
     command.argv = malloc((commandLineArgc * sizeof(char*)) + 2*sizeof(char*));
 
     for(i = 0; i < commandLineArgc; i++) {
         char *currentArgv = commandLineArgv[i];
         if (currentArgv == NULL) continue;
-        unsigned long currentArgvLength = strlen(currentArgv);
+        currentArgvLength = strlen(currentArgv);
 
         switch (currentArgv[0]) {
             case '<':
                 if (currentArgvLength <= 1) {
                     command.error = INPUT_FILE_ERR;
                 }
-                command.inputFile = malloc((currentArgvLength - 1) * sizeof(char));
+                command.inputFile = malloc((currentArgvLength) * sizeof(char));
                 strcpy(command.inputFile, currentArgv + 1);
-                command.inputFile[currentArgvLength - 1] = '\0';
                 break;
             case '>':
                 if (currentArgvLength <= 1) {
                     command.error = OUTPUT_FILE_ERR;
                 }
-                command.outputFile = malloc((currentArgvLength - 1) * sizeof(char));
+                command.outputFile = malloc((currentArgvLength) * sizeof(char));
                 strcpy(command.outputFile, currentArgv + 1);
-                command.outputFile[currentArgvLength - 1] = '\0';
                 break;
             case '&':
                 if (currentArgvLength != 1) {
@@ -219,13 +225,13 @@ struct Command getCommand() {
 
 #ifdef CUSTOMDEBUG
     int count;
-    printf("--------------\n");
+    printf("***************\n");
     printf("Pocet slov = %d\n", command.argc);
     for(count = 0; count < command.argc; count++){
         printf("argv[%d] %d = '%s'\n", count, (int)strlen(command.argv[count]), command.argv[count]);
     }
-    printf("input = %s\noutput = %s\nna pozadi = %d\n", command.inputFile, command.outputFile, (int)command.isBackground);
-    printf("--------------\n");
+    printf("input = %s\noutput = %s\n isBackgroud = %d\n", command.inputFile, command.outputFile, (int)command.isBackground);
+    printf("***************\n");
 #endif
 
     return command;
@@ -282,11 +288,6 @@ int startBackgroundCommand(struct Command *command) {
         /* chyba prikazu */
         perror(errors[COMMAND_BG_ERR]);
         exit(EXIT_FAILURE);
-    } /* parent */
-    else if(pid > 0) {
-        printf("\n na pozadi spusteno \n");
-    } else{
-        return FORK_ERR;
     }
 
     return OK;
@@ -298,7 +299,7 @@ int startNormalCommand(struct Command *command) {
     pid_t pid  = fork();
 
     /* child */
-    if (pid == 0) {
+    if(pid == 0) {
         /* presmerovanie vystupu */
         if (command->outputFile != NULL) {
             if ((err = redirectOutput(command->outputFile) != OK)) {
@@ -312,15 +313,16 @@ int startNormalCommand(struct Command *command) {
             }
         }
 
-        /* vykonanie prikazu */
+        foregroundProcess = pid;
+        /* vykonanie prikazu zo vstupu */
         execvp(command->argv[0], command->argv);
 
-        /* chyba vykonania prikazu */
         perror(errors[COMMAND_ERR]);
         exit(EXIT_FAILURE);
-    } else if(pid > 0){
-        /* cekani na child proces */
+    } else if(pid > 0) {
+        /* Normalny prikaz = cakam na child*/
         waitpid(pid, NULL, 0);
+        foregroundProcess = -1;
         return OK;
     } else {
         return FORK_ERR;
@@ -338,7 +340,7 @@ void *runCommand(void *arg) {
         lockKS(false);
 
 #ifdef CUSTOMDEBUG
-        printf("shell: dlzka vstupu: %d-%d\n'%s'\n", (int)strlen(bufferGlobal.buffer), bufferGlobal.length, bufferGlobal.buffer);
+        printf("shell: dlzka zadaneho vstupu: %d-%d\n'%s'\n", (int)strlen(bufferGlobal.buffer), bufferGlobal.length, bufferGlobal.buffer);
 #endif
         /* Ukoncenie programu */
         if (strcmp("exit", bufferGlobal.buffer) == 0) {
@@ -358,7 +360,6 @@ void *runCommand(void *arg) {
             if (command.outputFile != NULL) free(command.outputFile);
         }
 
-
         /* vystup z KS */
         bufferGlobal.isReading = true;
         unlockKS();
@@ -368,7 +369,6 @@ void *runCommand(void *arg) {
 
 int readMyInput() {
     int err;
-    bool withSignal = true;
 
     while (!end) {
         /* vstup do KS */
@@ -376,7 +376,7 @@ int readMyInput() {
 
         if(!end){
 
-            /* PROMPT */
+            /* $ */
             write(STDOUT_FILENO, (void*)PROMPT, strlen(PROMPT));
 
             if ((err = readStdin()) != OK) {
@@ -385,15 +385,11 @@ int readMyInput() {
             } else {
                 bufferGlobal.isReading = false;
             }
-            withSignal = true;
-        }
-        /* nastal end - neni co odblokovat */
-        else {
+        } else {
             bufferGlobal.isReading = false;
-            withSignal = false;
         }
 
-        /* vystup z KS */
+        /* vystup z KS + odblokovanie cakajucich procesov v monitore */
         unlockKS();
     }
 
@@ -423,13 +419,11 @@ int readStdin() {
 void lockKS(bool isReading) {
     pthread_mutex_lock(&(monitorGlobal.mutex));
     while(isReading ? !bufferGlobal.isReading : bufferGlobal.isReading) {
-        /* queue */
         pthread_cond_wait(&(monitorGlobal.cond), &(monitorGlobal.mutex));
     }
 }
 
 void unlockKS() {
-    /* odblokovanie cakajucej udalosti v queue + vystup z KS */
     pthread_cond_signal(&(monitorGlobal.cond));
     pthread_mutex_unlock(&(monitorGlobal.mutex));
 }
